@@ -44,6 +44,7 @@ int main(int argc, char *argv[]) {
         cudaDeviceSynchronize();
         std::swap(d_src, d_dest);
     }
+    // measure time
 
     auto end = std::chrono::steady_clock::now();
 
