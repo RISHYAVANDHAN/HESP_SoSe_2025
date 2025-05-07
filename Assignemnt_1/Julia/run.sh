@@ -15,7 +15,7 @@ CUDA_LIB="$CUDA_PATH/lib64"
 CUDA_INCLUDE="$CUDA_PATH/include"
 
 # For RTX 4050, the compute capability is 8.9 (Ada Lovelace architecture)
-NVCC_FLAGS="--std=c++20 -arch=sm_89 -Xcompiler=-std=c++20,-fPIC -Wno-deprecated-gpu-targets -I$CUDA_INCLUDE"
+NVCC_FLAGS="--std=c++17 -arch=sm_89 -Xcompiler=-std=c++20,-fPIC -Wno-deprecated-gpu-targets -I$CUDA_INCLUDE"
 
 # === BUILD ===
 echo "[1/3] Compiling lodepng.cpp..."
