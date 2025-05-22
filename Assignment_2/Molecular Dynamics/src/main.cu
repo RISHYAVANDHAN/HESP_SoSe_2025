@@ -1,5 +1,4 @@
 #include "io.h"
-#include "utils.h"
 #include "md_kernel.cuh"
 #include "vtk_writer.h"
 #include <vector>
@@ -50,6 +49,7 @@ int main(int argc, char** argv) {
     cudaMemcpy(particles.data(), d_particles, N * sizeof(Particle), cudaMemcpyDeviceToHost);
     cudaFree(d_particles);
 
+    void print_particles(const std::vector<Particle>& particles, int max_print);
     print_particles(particles, 5);
     return 0;
 }

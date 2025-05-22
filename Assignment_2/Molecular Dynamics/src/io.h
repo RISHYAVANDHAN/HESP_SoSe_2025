@@ -1,14 +1,12 @@
 #pragma once
 #include <vector>
 #include <string>
-
-struct float3 {
-    float x, y, z;
-};
+#include <cuda_runtime.h>
 
 struct Particle {
     float3 pos;
     float3 vel;
+    float3 acc;
     float mass;
 };
 

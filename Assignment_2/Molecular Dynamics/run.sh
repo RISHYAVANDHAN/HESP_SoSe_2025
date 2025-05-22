@@ -10,7 +10,7 @@ make
 mkdir -p output
 
 # Simulation parameters
-INPUT_FILE="input/particles_test1.txt"
+INPUT_FILE="src/input/particles_test1.txt"
 DT=0.001
 NSTEPS=1000
 SIGMA=1.0
