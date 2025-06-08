@@ -32,7 +32,6 @@ __global__ void kernel_build_neighbor_list(
     const DeviceBinningData bin_data,
     const Grid grid,
     DeviceNeighborData nb_data,
-    float *box_size,
     float rcut_sq
 ) {
     int i_sorted = blockIdx.x * blockDim.x + threadIdx.x;

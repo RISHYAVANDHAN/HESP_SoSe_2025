@@ -100,7 +100,7 @@ __host__ void print_particles(const Particle* particles, int num_particles) {
 }
 
 
-__global__ void velocity_verlet_step1(Particle* particles, int num_particles, float dt, float box_size[]) {
+__global__ void velocity_verlet_step1(Particle* particles, int num_particles, float dt) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < num_particles) {
         auto& p = particles[i];
@@ -167,7 +167,7 @@ __global__ void compute_lj_forces(Particle* particles, int num_particles, float 
 }
 
 
-__global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, float sigma, float epsilon, float rcut, float box_size[]) {
+__global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, float sigma, float epsilon, float rcut) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_particles) return;
 
@@ -205,7 +205,7 @@ __global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, f
 }
 
 
-__global__ void compute_lj_forces_binned( Particle* particles, int num_particles, float sigma, float epsilon,  float rcut, float box_size[], const DeviceBinningData bin_data, const Grid grid) 
+__global__ void compute_lj_forces_binned( Particle* particles, int num_particles, float sigma, float epsilon,  float rcut, const DeviceBinningData bin_data, const Grid grid) 
 {
     int i_sorted = blockIdx.x * blockDim.x + threadIdx.x;
     if (i_sorted >= num_particles) return;
