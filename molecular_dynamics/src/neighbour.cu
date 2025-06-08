@@ -8,7 +8,9 @@
 #define max_particles_per_cell 64
 #endif
 
-void build_neighbor_list(DeviceNeighborData& nb_data, const Particle* d_particles, const DeviceBinningData& bin_data, const Grid& grid, float rcut, const float box_size[3]) {
+extern __constant__ float d_box_size[3];  // Add this at the top
+
+void build_neighbor_list(DeviceNeighborData& nb_data, const Particle* d_particles, const DeviceBinningData& bin_data, const Grid& grid, float rcut) {
     int max_neighbors = 27 * max_particles_per_cell;
     if (nb_data.neighbors == nullptr) {
         cudaMalloc(&nb_data.neighbors, bin_data.num_particles * max_neighbors * sizeof(int));
@@ -16,11 +18,11 @@ void build_neighbor_list(DeviceNeighborData& nb_data, const Particle* d_particle
         nb_data.max_neighbors = max_neighbors;
     }
     float rcut_sq = rcut * rcut;
-    float box_size_arr[3] = {box_size[0], box_size[1], box_size[2]};
+    //float box_size_arr[3] = {box_size[0], box_size[1], box_size[2]};
     int blockSize = 256;
     int gridSize = (bin_data.num_particles + blockSize - 1) / blockSize;
     kernel_build_neighbor_list<<<gridSize, blockSize>>>(
-        d_particles, bin_data, grid, nb_data, box_size_arr, rcut_sq
+        d_particles, bin_data, grid, nb_data, rcut_sq
     );
     cudaDeviceSynchronize();
 }
@@ -74,8 +76,8 @@ __global__ void kernel_build_neighbor_list(
                     // Distance calculation with MIC
                     Vector3 rij = particles[original_j].position - pi->position;
                     for (int d = 0; d < 3; d++) {
-                        if (rij[d] >  0.5f * box_size[d]) rij[d] -= box_size[d];
-                        else if (rij[d] < -0.5f * box_size[d]) rij[d] += box_size[d];
+                        if (rij[d] >  0.5f * d_box_size[d]) rij[d] -= d_box_size[d];
+                        else if (rij[d] < -0.5f * d_box_size[d]) rij[d] += d_box_size[d];
                     }
                     
                     float r2 = rij.squaredNorm();

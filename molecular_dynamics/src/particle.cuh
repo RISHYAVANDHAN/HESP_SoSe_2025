@@ -2,6 +2,7 @@
 
 #include "../input/cli.cuh" 
 #include "binning.cuh" 
+#include "neighbour.cuh"
 #include <iostream>
 #include <cmath>
 #include <cuda_runtime.h>
@@ -9,7 +10,10 @@
 
 // Forward declarations to break circular dependency
 struct DeviceBinningData;
+struct DeviceNeighborData;
 struct Grid;
+extern __constant__ float d_box_size[3];
+
 
 struct Vector3 {
     float x, y, z;
@@ -67,6 +71,8 @@ struct Particle {
     float mass;
 };
 
+// Add constant memory declaration
+extern __constant__ float d_box_size[3];
 
 void load_particles_from_file(const std::string& filename, Particle*& particles, int& num_particles);
 
@@ -91,15 +97,17 @@ __device__ void apply_gravity(Particle* p);
 
 __global__ void apply_forces(Particle* particles, int num_particles);
 
-__global__ void velocity_verlet_step1(Particle* particles, int num_particles, float dt, float box_size[]);
+__global__ void velocity_verlet_step1(Particle* particles, int num_particles, float dt);
 
 __global__ void velocity_verlet_step2(Particle* particles, int num_particles, float dt);
 
 __device__ bool in_grid_bounds(int3 coord, int3 dims);
 
-__global__ void compute_lj_forces_binned(Particle* particles, int num_particles, float sigma, float epsilon, float rcut, float box_size[], const DeviceBinningData bin_data, const Grid grid);
+__global__ void compute_lj_forces_binned(Particle* particles, int num_particles, float sigma, float epsilon, float rcut, const DeviceBinningData bin_data, const Grid grid);
 
-__global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, float sigma, float epsilon, float rcut, float box_size[]);
+__global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, float sigma, float epsilon, float rcut);
+
+__global__ void compute_lj_forces_neighbor(Particle* particles, int num_particles, float sigma, float epsilon, const DeviceNeighborData nb_data);
 
 __global__ void compute_lj_forces(Particle* particles, int num_particles, float sigma, float epsilon);
 

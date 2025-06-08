@@ -15,6 +15,7 @@ static DeviceBinningData bin_data = {nullptr, nullptr, nullptr, 0, 0};
 static DeviceNeighborData nb_data = {nullptr, nullptr, 0, 0};
 static Grid grid;
 static bool first_run = true;
+__constant__ float d_box_size[3];
 
 void load_particles_from_file(const std::string& filename, Particle*& particles, int& num_particles) {
     std::ifstream file(filename);
@@ -112,9 +113,9 @@ __global__ void velocity_verlet_step1(Particle* particles, int num_particles, fl
         // Apply periodic boundary conditions
         for (int d = 0; d < 3; ++d) {
             if (p.position[d] < 0.0f)
-                p.position[d] += box_size[d];
-            else if (p.position[d] >= box_size[d])
-                p.position[d] -= box_size[d];
+                p.position[d] += d_box_size[d];
+            else if (p.position[d] >= d_box_size[d])
+                p.position[d] -= d_box_size[d];
         }
     }
 }
@@ -180,7 +181,7 @@ __global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, f
             Vector3 rij = particles[j].position - particles[i].position;
             // Apply minimum image convention
             for (int d = 0; d < 3; ++d) {
-                float box_d = box_size[d];
+                float box_d = d_box_size[d];
                 if (rij[d] >  0.5f * box_d) rij[d] -= box_d;
                 if (rij[d] < -0.5f * box_d) rij[d] += box_d;
             }
@@ -251,7 +252,7 @@ __global__ void compute_lj_forces_binned( Particle* particles, int num_particles
                     
                     // Minimum image convention
                     for (int d = 0; d < 3; d++) {
-                        float box_d = box_size[d];
+                        float box_d = d_box_size[d];
                         if (rij[d] >  0.5f * box_d) rij[d] -= box_d;
                         else if (rij[d] < -0.5f * box_d) rij[d] += box_d;
                     }
@@ -281,8 +282,7 @@ __global__ void compute_lj_forces_neighbor(
     int num_particles, 
     float sigma, 
     float epsilon, 
-    const DeviceNeighborData nb_data,
-    float box_size[]
+    const DeviceNeighborData nb_data
 ) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_particles) return;
@@ -302,8 +302,8 @@ __global__ void compute_lj_forces_neighbor(
 
         Vector3 rij = pj.position - pi.position;
         for (int d = 0; d < 3; ++d) {
-            if (rij[d] > 0.5f * box_size[d]) rij[d] -= box_size[d];
-            else if (rij[d] < -0.5f * box_size[d]) rij[d] += box_size[d];
+            if (rij[d] > 0.5f * d_box_size[d]) rij[d] -= d_box_size[d];
+            else if (rij[d] < -0.5f * d_box_size[d]) rij[d] += d_box_size[d];
         }
 
         float r2 = rij.squaredNorm();
@@ -330,6 +330,7 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
 
     // Prepare box_size array for device kernels
     float box_size_arr[3] = {box_size[0], box_size[1], box_size[2]};
+    cudaMemcpyToSymbol(d_box_size, box_size_arr, 3 * sizeof(float));
 
     // Initialize binning structures on first run
     if (first_run && rcut > 0.0f) {
@@ -357,7 +358,7 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
 
     // Step 1: Position update (if in simulation step)
     if (dt > 0.0f) {
-        velocity_verlet_step1<<<gridSize, blockSize>>>(d_particles, num_particles, dt, box_size_arr);
+        velocity_verlet_step1<<<gridSize, blockSize>>>(d_particles, num_particles, dt);
         cudaDeviceSynchronize();
     }
 
@@ -370,15 +371,14 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
             
         case MethodType::CUTOFF:
             compute_lj_forces_rcut<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon, rcut, box_size_arr
+                d_particles, num_particles, sigma, epsilon, rcut
             );
             break;
             
         case MethodType::CELL:
             build_binning(bin_data, d_particles, grid);
             compute_lj_forces_binned<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon, rcut, 
-                box_size_arr, bin_data, grid
+                d_particles, num_particles, sigma, epsilon, rcut, bin_data, grid
             );
             break;
             
@@ -392,9 +392,9 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
             }
 
             build_binning(bin_data, d_particles, grid);
-            build_neighbor_list(nb_data, d_particles, bin_data, grid, rcut, box_size_arr);
+            build_neighbor_list(nb_data, d_particles, bin_data, grid, rcut);
             compute_lj_forces_neighbor<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon, nb_data, box_size_arr
+                d_particles, num_particles, sigma, epsilon, nb_data
             );
             break;
     }
@@ -450,6 +450,7 @@ void cleanup_simulation() {
     if (nb_data.num_neighbors) cudaFree(nb_data.num_neighbors);
     nb_data = {nullptr, nullptr, 0, 0};
 }
+
 
 
 

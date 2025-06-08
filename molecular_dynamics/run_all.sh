@@ -17,6 +17,7 @@ cd build
 cmake .. && make -j
 cd ..
 
+:<<'End comment'
 echo -e "\n[INFO] Running Simple Test Cases (stable, repulsive, attractive)"
 for TEST_CASE in stable repulsive attractive; do
   OUTPUT_PATH="$OUTPUT_DIR/Simple/$TEST_CASE"
@@ -91,6 +92,7 @@ for CASE_NAME in "${!INTERESTING_CASE_PATTERNS[@]}"; do
         --freq 100\
         --benchmark
 done
+End comment
 
 METHODS=("base" "cutoff" "cell" "neighbour")
 PARTICLE_COUNTS=(10 25 50 150 250 500)
@@ -114,7 +116,7 @@ for METHOD in "${METHODS[@]}"; do
             --dt 0.001 \
             --sigma 0.0501 \
             --epsilon 0.015 \
-            --rcut $(awk "BEGIN {print $RCUT * 0.0501}") \
+            --rcut 2.5 \
             --method "$METHOD" \
             --box 10.0 10.0 10.0 \
             --output "$OUTPUT_PATH" \
@@ -141,6 +143,7 @@ else
     echo "[WARNING] No benchmark files found for analysis"
 fi
 
+:<< 'End comment'
 echo -e "\n[INFO] Performance Analysis Summary - Implementation of MD"
 echo "======================================"
 
@@ -159,6 +162,7 @@ for csv_file in "$BENCHMARK_DIR"/csv/benchmark_*.csv; do
         fi
     fi
 done
+End comment
 
 echo -e "\n[INFO] Performance Comparison Summary - Accelaration Techniques"
 echo "======================================"

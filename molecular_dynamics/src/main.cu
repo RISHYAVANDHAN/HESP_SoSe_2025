@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
     // Extract config values for easier access
     float sigma      = config.sigma;
     float epsilon    = config.epsilon;
-    float box_size[3] = {config.box_size[0], config.box_size[1], config.box_size[2]};
+    float d_box_size[3] = {config.box_size[0], config.box_size[1], config.box_size[2]};
     float dt         = config.dt;
     int   num_steps  = config.num_steps;
     int   output_freq= config.output_freq;
@@ -139,7 +139,7 @@ int main(int argc, char** argv) {
     std::cout << "========== Simulation Configuration ==========\n";
 
     // Initial force computation (step 0)
-    run_simulation(particles, num_particles, 0.0f, sigma, epsilon, rcut, box_size, method);
+    run_simulation(particles, num_particles, 0.0f, sigma, epsilon, rcut, d_box_size, method);
 
     // Main simulation loop with proper timing
     for (int step = 0; step < num_steps; ++step) {
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
         }
 
         // Run the actual simulation step
-        run_simulation(particles, num_particles, dt, sigma, epsilon, rcut, box_size, method);
+        run_simulation(particles, num_particles, dt, sigma, epsilon, rcut, d_box_size, method);
 
         // End timing for this step
         if (log_csv) {
