@@ -15,7 +15,12 @@ static DeviceBinningData bin_data = {nullptr, nullptr, nullptr, 0, 0};
 static DeviceNeighborData nb_data = {nullptr, nullptr, 0, 0};
 static Grid grid;
 static bool first_run = true;
+
 __constant__ float d_box_size[3];
+
+__constant__ float d_gravity[3] = {0.0f, -9.81f, 0.0f};
+
+__constant__ DEMParams d_dem_params;
 
 void load_particles_from_file(const std::string& filename, Particle*& particles, int& num_particles) {
     std::ifstream file(filename);
@@ -70,20 +75,18 @@ __host__ void initialize_particles(Particle* particles, int num_particles, float
     }
 }
 
-__device__ void update_force(Particle* p) {
-    p->force = Vector3(0.0f, 0.0f, 0.0f);
-}
-
-__device__ void apply_gravity(Particle* p) {
-    Vector3 gravity(0.0f, -9.81f, 0.0f);
-    p->force += gravity * p->mass;
-}
-
-__global__ void apply_forces(Particle* particles, int num_particles) {
+__global__ void clear_forces(Particle* particles, int num_particles) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < num_particles) {
-        update_force(&particles[idx]);
-        apply_gravity(&particles[idx]);
+        particles[idx].force = Vector3(0.0f, 0.0f, 0.0f);
+    }
+}
+
+__global__ void apply_gravity(Particle* particles, int num_particles) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < num_particles) {
+        Vector3 gravity(d_gravity[0], d_gravity[1], d_gravity[2]);
+        particles[idx].force += gravity * particles[idx].mass;
     }
 }
 
@@ -94,7 +97,8 @@ __host__ void print_particles(const Particle* particles, int num_particles) {
                   << " | Pos: (" << p.position.x << ", " << p.position.y << ", " << p.position.z << ")"
                   << " | Vel: (" << p.velocity.x << ", " << p.velocity.y << ", " << p.velocity.z << ")"
                   << " | Force: (" << p.force.x << ", " << p.force.y << ", " << p.force.z << ")"
-                  << " | Mass: " << p.mass << '\n';
+                  << " | Mass: " << p.mass << ", "
+                  << " | Radius: "<< p.radius << '\n' ;
     }
     std::cout<<std::endl;
 }
@@ -104,18 +108,19 @@ __global__ void velocity_verlet_step1(Particle* particles, int num_particles, fl
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i < num_particles) {
         auto& p = particles[i];
-        // Store current acceleration
         p.acceleration = (p.force / p.mass);
+        p.position += p.velocity * dt + p.acceleration * (0.5f * dt * dt);
         
-        // Update position: x(t+dt) = x(t) + v(t)*dt + 0.5*a(t)*dt^2
-        p.position += p.velocity * dt + p.acceleration * (0.5f * dt * dt);   
-
-        // Apply periodic boundary conditions
+        // Reflexive boundary conditions
         for (int d = 0; d < 3; ++d) {
-            if (p.position[d] < 0.0f)
-                p.position[d] += d_box_size[d];
-            else if (p.position[d] >= d_box_size[d])
-                p.position[d] -= d_box_size[d];
+            if (p.position[d] < p.radius) {
+                p.position[d] = 2.0f * p.radius - p.position[d];
+                p.velocity[d] = -p.velocity[d] * d_dem_params.bounce_coeff;
+            }
+            else if (p.position[d] > d_box_size[d] - p.radius) {
+                p.position[d] = 2.0f * (d_box_size[d] - p.radius) - p.position[d];
+                p.velocity[d] = -p.velocity[d] * d_dem_params.bounce_coeff;
+            }
         }
     }
 }
@@ -141,72 +146,40 @@ __device__ bool in_grid_bounds(int3 coord, int3 dims) {
            coord.z >= 0 && coord.z < dims.z;
 }
 
-__global__ void compute_lj_forces(Particle* particles, int num_particles, float sigma, float epsilon) {
+__device__ void compute_contact_force(Particle* pi, Particle* pj, Vector3& force) {
+    Vector3 rij = pj->position - pi->position;
+    float dist = rij.norm();
+    float r_sum = pi->radius + pj->radius;
+    float overlap = r_sum - dist;
+    
+    if (overlap > 0) {
+        Vector3 normal = rij / dist;
+        Vector3 v_rel = pj->velocity - pi->velocity;
+        float v_normal = v_rel.dot(normal);
+        float f_contact = d_dem_params.stiffness * overlap;
+        float f_damp = d_dem_params.damping * v_normal;
+        force = normal * (f_contact - f_damp);
+    }
+}
+
+__global__ void compute_dem_contacts(Particle* particles, int num_particles) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_particles) return;
 
+    Particle& pi = particles[i];
     Vector3 total_force(0.0f, 0.0f, 0.0f);
 
     for (int j = 0; j < num_particles; ++j) {
-        if ((i != j)) 
-        {
-            Vector3 rij = particles[j].position - particles[i].position;
-            float r2 = rij.squaredNorm();
-            float r = sqrtf(r2);
-            float inv_r2 = 1.0f / r2;
-            float sigma2 = sigma * sigma;
-            float term = sigma2 * inv_r2;          // (sigma/r)^2
-            float B_m = term * term * term;        // (sigma/r)^6
-            float A_n = B_m * B_m;                 // (sigma/r)^12
-            float f_mag = (24.0f * epsilon * (2.0f * A_n - B_m)) * inv_r2;
-            Vector3 f_dir = rij / r;
-            total_force += f_dir * f_mag;
-        }
+        if (i == j) continue;
+        Particle& pj = particles[j];
+        Vector3 contact_force;
+        compute_contact_force(&pi, &pj, contact_force);
+        total_force += contact_force;
     }
-    particles[i].force = total_force;
+    pi.force += total_force;
 }
 
-
-__global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, float sigma, float epsilon, float rcut) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i >= num_particles) return;
-
-    Vector3 total_force(0.0f, 0.0f, 0.0f);
-
-    float rcut_sq = rcut * rcut;
-
-    for (int j = 0; j < num_particles; ++j) {
-        if ((i != j)) 
-        {
-            Vector3 rij = particles[j].position - particles[i].position;
-            // Apply minimum image convention
-            for (int d = 0; d < 3; ++d) {
-                float box_d = d_box_size[d];
-                if (rij[d] >  0.5f * box_d) rij[d] -= box_d;
-                if (rij[d] < -0.5f * box_d) rij[d] += box_d;
-            }
-
-            float r2 = rij.squaredNorm();
-            if (rcut == 0.0f || r2 <= rcut_sq)
-            {
-                float r = sqrtf(r2);
-                float inv_r2 = 1.0f / r2;
-                float sigma2 = sigma * sigma;
-                float term = sigma2 * inv_r2;          // (sigma/r)^2
-                float B_m = term * term * term;        // (sigma/r)^6
-                float A_n = B_m * B_m;                 // (sigma/r)^12
-                float f_mag = (24.0f * epsilon * (2.0f * A_n - B_m)) * inv_r2;
-                Vector3 f_dir = rij / r;
-                total_force += f_dir * f_mag;
-            }
-        }
-    }
-    particles[i].force = total_force;
-}
-
-
-__global__ void compute_lj_forces_binned( Particle* particles, int num_particles, float sigma, float epsilon,  float rcut, const DeviceBinningData bin_data, const Grid grid) 
-{
+__global__ void compute_dem_contacts_binned(Particle* particles, int num_particles, const DeviceBinningData bin_data, const Grid grid) {
     int i_sorted = blockIdx.x * blockDim.x + threadIdx.x;
     if (i_sorted >= num_particles) return;
 
@@ -219,26 +192,21 @@ __global__ void compute_lj_forces_binned( Particle* particles, int num_particles
     int cy = (cell_idx % (grid.dims.x * grid.dims.y)) / grid.dims.x;
     int cx = cell_idx % grid.dims.x;
 
-    float rcut_sq = rcut * rcut;
-
     for (int dz = -1; dz <= 1; dz++) {
         for (int dy = -1; dy <= 1; dy++) {
             for (int dx = -1; dx <= 1; dx++) {
                 int3 neighbor_coord = make_int3(cx + dx, cy + dy, cz + dz);
                 
-                // Apply periodic boundary to grid
-                if (neighbor_coord.x < 0) neighbor_coord.x += grid.dims.x;
-                else if (neighbor_coord.x >= grid.dims.x) neighbor_coord.x -= grid.dims.x;
-                if (neighbor_coord.y < 0) neighbor_coord.y += grid.dims.y;
-                else if (neighbor_coord.y >= grid.dims.y) neighbor_coord.y -= grid.dims.y;
-                if (neighbor_coord.z < 0) neighbor_coord.z += grid.dims.z;
-                else if (neighbor_coord.z >= grid.dims.z) neighbor_coord.z -= grid.dims.z;
-
-                if (!in_grid_bounds(neighbor_coord, grid.dims)) continue;
+                // Skip out-of-bound cells for DEM
+                if (neighbor_coord.x < 0 || neighbor_coord.x >= grid.dims.x ||
+                    neighbor_coord.y < 0 || neighbor_coord.y >= grid.dims.y ||
+                    neighbor_coord.z < 0 || neighbor_coord.z >= grid.dims.z) {
+                    continue;
+                }
                 
-                int neighbor_idx = neighbor_coord.x + 
-                                 neighbor_coord.y * grid.dims.x + 
-                                 neighbor_coord.z * grid.dims.x * grid.dims.y;
+                int neighbor_idx =  neighbor_coord.x + 
+                                    neighbor_coord.y * grid.dims.x + 
+                                    neighbor_coord.z * grid.dims.x * grid.dims.y;
                 
                 int start = bin_data.cell_offsets[neighbor_idx];
                 int end = bin_data.cell_offsets[neighbor_idx + 1];
@@ -248,77 +216,38 @@ __global__ void compute_lj_forces_binned( Particle* particles, int num_particles
                     if (original_i == original_j) continue;
                     
                     Particle* pj = &particles[original_j];
-                    Vector3 rij = pj->position - pi->position;
-                    
-                    // Minimum image convention
-                    for (int d = 0; d < 3; d++) {
-                        float box_d = d_box_size[d];
-                        if (rij[d] >  0.5f * box_d) rij[d] -= box_d;
-                        else if (rij[d] < -0.5f * box_d) rij[d] += box_d;
-                    }
-                    
-                    float r2 = rij.squaredNorm();
-                    if (r2 >= rcut_sq) continue;
-                    
-                    float r = sqrtf(r2);
-                    float inv_r2 = 1.0f / r2;
-                    float sigma2 = sigma * sigma;
-                    float term = sigma2 * inv_r2;
-                    float B_m = term * term * term;
-                    float A_n = B_m * B_m;
-                    float f_mag = (24.0f * epsilon * (2.0f * A_n - B_m)) * inv_r2;
-                    Vector3 f_dir = rij / r;
-                    total_force += f_dir * f_mag;
+                    Vector3 contact_force;
+                    compute_contact_force(pi, pj, contact_force);
+                    total_force += contact_force;
                 }
             }
         }
     }
-    pi->force = total_force;
+    pi->force += total_force;
 }
 
-// particle.cu
-__global__ void compute_lj_forces_neighbor(
-    Particle* particles, 
-    int num_particles, 
-    float sigma, 
-    float epsilon, 
-    const DeviceNeighborData nb_data
-) {
+__global__ void compute_dem_contacts_neighbor(Particle* particles, int num_particles, const DeviceNeighborData nb_data) {
     int i = blockIdx.x * blockDim.x + threadIdx.x;
     if (i >= num_particles) return;
 
     Particle& pi = particles[i];
-    Vector3 force_i = {0.0f, 0.0f, 0.0f};
-
-    float sigma6 = powf(sigma, 6);
-    float sigma12 = sigma6 * sigma6;
+    Vector3 total_force(0.0f, 0.0f, 0.0f);
 
     int neighbor_count = nb_data.num_neighbors[i];
     int* neighbor_list = &nb_data.neighbors[i * nb_data.max_neighbors];
 
-    for (int n = 0; n < neighbor_count; ++n){
+    for (int n = 0; n < neighbor_count; ++n) {
         int j = neighbor_list[n];
-        Particle pj = particles[j];
-
-        Vector3 rij = pj.position - pi.position;
-        for (int d = 0; d < 3; ++d) {
-            if (rij[d] > 0.5f * d_box_size[d]) rij[d] -= d_box_size[d];
-            else if (rij[d] < -0.5f * d_box_size[d]) rij[d] += d_box_size[d];
-        }
-
-        float r2 = rij.squaredNorm();
-        float r6 = r2 * r2 * r2;
-        float r12 = r6 * r6;
-        float f_scalar = 24.0f * epsilon * (2.0f * sigma12 / r12 - sigma6 / r6) / r2;
-
-        force_i += rij * f_scalar;
+        Particle& pj = particles[j];
+        Vector3 contact_force;
+        compute_contact_force(&pi, &pj, contact_force);
+        total_force += contact_force;
     }
-
-    pi.force = force_i;
+    pi.force += total_force;
 }
 
 
-__host__ void run_simulation(Particle* particles, int num_particles, float dt, float sigma, float epsilon, float rcut, const float box_size[3], MethodType method) 
+__host__ void run_simulation(Particle* particles, int num_particles, float dt, float sigma, float epsilon, float rcut, const float box_size[3], MethodType method, const DEMParams& dem_params) 
 {
     Particle* d_particles;
     size_t size = num_particles * sizeof(Particle);
@@ -327,6 +256,7 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
 
     int blockSize = 256;
     int gridSize = (num_particles + blockSize - 1) / blockSize;
+    float max_radius = 0.0f;
 
     // Prepare box_size array for device kernels
     float box_size_arr[3] = {box_size[0], box_size[1], box_size[2]};
@@ -356,30 +286,28 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
         first_run = false;
     }
 
-    // Step 1: Position update (if in simulation step)
+    cudaMemcpyToSymbol(d_dem_params, &dem_params, sizeof(DEMParams));
+
+    // Step 1: Position update
     if (dt > 0.0f) {
         velocity_verlet_step1<<<gridSize, blockSize>>>(d_particles, num_particles, dt);
         cudaDeviceSynchronize();
     }
 
+    // Clear forces and apply gravity
+    clear_forces<<<gridSize, blockSize>>>(d_particles, num_particles);
+    apply_gravity<<<gridSize, blockSize>>>(d_particles, num_particles);
+    cudaDeviceSynchronize();
+
+    // Compute DEM contacts based on method
     switch (method) {
         case MethodType::BASE:
-            compute_lj_forces<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon
-            );
-            break;
-            
-        case MethodType::CUTOFF:
-            compute_lj_forces_rcut<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon, rcut
-            );
+            compute_dem_contacts<<<gridSize, blockSize>>>(d_particles, num_particles);
             break;
             
         case MethodType::CELL:
             build_binning(bin_data, d_particles, grid);
-            compute_lj_forces_binned<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon, rcut, bin_data, grid
-            );
+            compute_dem_contacts_binned<<<gridSize, blockSize>>>(d_particles, num_particles, bin_data, grid);
             break;
             
         case MethodType::NEIGHBOUR:
@@ -390,17 +318,22 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
                 nb_data.max_neighbors = max_neighbors;
                 nb_data.num_particles = num_particles;
             }
-
             build_binning(bin_data, d_particles, grid);
-            build_neighbor_list(nb_data, d_particles, bin_data, grid, rcut);
-            compute_lj_forces_neighbor<<<gridSize, blockSize>>>(
-                d_particles, num_particles, sigma, epsilon, nb_data
-            );
+            // Set cutoff to max particle diameter * 1.2
+            for (int i = 0; i < num_particles; i++) {
+                if (particles[i].radius > max_radius) max_radius = particles[i].radius;
+            }
+            build_neighbor_list(nb_data, d_particles, bin_data, grid, 2.4f * max_radius);
+            compute_dem_contacts_neighbor<<<gridSize, blockSize>>>(d_particles, num_particles, nb_data);
+            break;
+            
+        default: // CUTOFF not used in DEM
+            compute_dem_contacts<<<gridSize, blockSize>>>(d_particles, num_particles);
             break;
     }
     cudaDeviceSynchronize();
 
-    // Step 2: Velocity update (if in simulation step)
+    // Step 2: Velocity update
     if (dt > 0.0f) {
         velocity_verlet_step2<<<gridSize, blockSize>>>(d_particles, num_particles, dt);
         cudaDeviceSynchronize();

@@ -82,6 +82,12 @@ int main(int argc, char** argv) {
     MethodType method      = config.method;
     float rcut             = (method == MethodType::CUTOFF) ? config.rcut : 0.0f;
 
+    // DEM Simulation parametrs
+    DEMParams dem_params;
+    dem_params.stiffness = config.stiffness;
+    dem_params.damping = config.damping;
+    dem_params.bounce_coeff = config.bounce_coeff;
+
     // Load particle data from input file
     int num_particles = 0;
     Particle* particles;
@@ -139,7 +145,7 @@ int main(int argc, char** argv) {
     std::cout << "========== Simulation Configuration ==========\n";
 
     // Initial force computation (step 0)
-    run_simulation(particles, num_particles, 0.0f, sigma, epsilon, rcut, d_box_size, method);
+    run_simulation(particles, num_particles, 0.0f, sigma, epsilon, rcut, d_box_size, method, dem_params);
 
     // Main simulation loop with proper timing
     for (int step = 0; step < num_steps; ++step) {
@@ -149,7 +155,7 @@ int main(int argc, char** argv) {
         }
 
         // Run the actual simulation step
-        run_simulation(particles, num_particles, dt, sigma, epsilon, rcut, d_box_size, method);
+        run_simulation(particles, num_particles, dt, sigma, epsilon, rcut, d_box_size, method, dem_params);
 
         // End timing for this step
         if (log_csv) {

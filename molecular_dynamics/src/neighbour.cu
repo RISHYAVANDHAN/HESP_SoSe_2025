@@ -55,12 +55,12 @@ __global__ void kernel_build_neighbor_list(
                 int3 nb_coord = make_int3(cx + dx, cy + dy, cz + dz);
                 
                 // Apply PBC to grid
-                if (nb_coord.x < 0) nb_coord.x += grid.dims.x;
-                else if (nb_coord.x >= grid.dims.x) nb_coord.x -= grid.dims.x;
-                if (nb_coord.y < 0) nb_coord.y += grid.dims.y;
-                else if (nb_coord.y >= grid.dims.y) nb_coord.y -= grid.dims.y;
-                if (nb_coord.z < 0) nb_coord.z += grid.dims.z;
-                else if (nb_coord.z >= grid.dims.z) nb_coord.z -= grid.dims.z;
+                // Skip out-of-bound cells for DEM
+                if (nb_coord.x < 0 || nb_coord.x >= grid.dims.x ||
+                    nb_coord.y < 0 || nb_coord.y >= grid.dims.y ||
+                    nb_coord.z < 0 || nb_coord.z >= grid.dims.z) {
+                    continue;
+                }
 
                 int nb_idx = nb_coord.x + nb_coord.y * grid.dims.x + 
                             nb_coord.z * grid.dims.x * grid.dims.y;

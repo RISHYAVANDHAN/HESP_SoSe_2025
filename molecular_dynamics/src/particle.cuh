@@ -19,6 +19,7 @@ struct Vector3 {
     float x, y, z;
 
     __host__ __device__ Vector3() : x(0), y(0), z(0) {}
+
     __host__ __device__ Vector3(float x_, float y_, float z_) : x(x_), y(y_), z(z_) {}
 
     __host__ __device__ Vector3 operator+(const Vector3& rhs) const {
@@ -54,11 +55,15 @@ struct Vector3 {
     }
 
     __host__ __device__ float norm() const {
-        return sqrtf(x*x + y*y + z*z);
+        return sqrtf(x * x + y * y + z * z);
     }
 
     __host__ __device__ float squaredNorm() const {
-        return x*x + y*y + z*z;
+        return x * x + y * y + z * z;
+    }
+
+    __host__ __device__ float dot(const Vector3& v2) const {
+        return x * v2.x + y * v2.y + z * v2.z;
     }
 
 };
@@ -69,6 +74,13 @@ struct Particle {
     Vector3 force;
     Vector3 acceleration; 
     float mass;
+    float radius;
+};
+
+struct DEMParams {
+    float stiffness;
+    float damping;
+    float bounce_coeff;
 };
 
 // Add constant memory declaration
@@ -84,37 +96,31 @@ __host__ void print_particles(const Particle* particles, int num_particles);
 
 __host__ void print_diagnostics(const Particle* particles, int num_particles);
 
-__host__ void run_simulation(Particle* particles, int num_particles, float dt, float sigma, float epsilon, float rcut, const float box_size[3], MethodType method);
+__host__ void run_simulation(Particle* particles, int num_particles, float dt, float sigma, float epsilon, float rcut, const float box_size[3], MethodType method, const DEMParams& dem_params);
 
 void cleanup_simulation();
 
 // =====================
 // Device/Kernel functions
 // =====================
-__device__ void update_force(Particle* p);
+__global__ void clear_forces(Particle* particles, int num_particles);
 
-__device__ void apply_gravity(Particle* p);
-
-__global__ void apply_forces(Particle* particles, int num_particles);
+__global__ void apply_gravity(Particle* particles, int num_particles);
 
 __global__ void velocity_verlet_step1(Particle* particles, int num_particles, float dt);
 
 __global__ void velocity_verlet_step2(Particle* particles, int num_particles, float dt);
 
+__global__ void compute_dem_contacts(Particle* particles, int num_particles) ;
+
+__global__ void compute_dem_contacts_binned(Particle* particles, int num_particles, const DeviceBinningData bin_data, const Grid grid) ;
+
+__global__ void compute_dem_contacts_neighbor(Particle* particles, int num_particles, const DeviceNeighborData nb_data) ;
+
 __device__ bool in_grid_bounds(int3 coord, int3 dims);
 
-__global__ void compute_lj_forces_binned(Particle* particles, int num_particles, float sigma, float epsilon, float rcut, const DeviceBinningData bin_data, const Grid grid);
-
-__global__ void compute_lj_forces_rcut(Particle* particles, int num_particles, float sigma, float epsilon, float rcut);
-
-__global__ void compute_lj_forces_neighbor(Particle* particles, int num_particles, float sigma, float epsilon, const DeviceNeighborData nb_data);
-
-__global__ void compute_lj_forces(Particle* particles, int num_particles, float sigma, float epsilon);
+__device__ void compute_contact_force(Particle* pi, Particle* pj, Vector3& force) ;
 
 
-// =====================
-// Utility (if needed)
-// =====================
-// Add any additional declarations here
 
 

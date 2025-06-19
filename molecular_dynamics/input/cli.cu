@@ -45,6 +45,18 @@ void parse_command_line_args(int argc, char** argv, SimulationConfig& config) {
             else if (m == "cell")   config.method = MethodType::CELL;
             else if (m == "neighbour") config.method = MethodType::NEIGHBOUR;
         }
+        else if (strcmp(argv[i], "--particle_radius") == 0 && i + 1 < argc) {
+            config.particle_radius = std::stof(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--stiffness") == 0 && i + 1 < argc) {
+            config.stiffness = std::stof(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--damping") == 0 && i + 1 < argc) {
+            config.damping = std::stof(argv[++i]);
+        }
+        else if (strcmp(argv[i], "--bounce_coeff") == 0 && i + 1 < argc) {
+            config.bounce_coeff = std::stof(argv[++i]);
+        }
 
         else if (strcmp(argv[i], "--help") == 0) {
             std::cout << "Usage:\n"
