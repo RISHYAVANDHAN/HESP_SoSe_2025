@@ -54,7 +54,6 @@ __global__ void kernel_build_neighbor_list(
             for (int dx = -1; dx <= 1; dx++) {
                 int3 nb_coord = make_int3(cx + dx, cy + dy, cz + dz);
                 
-                // Apply PBC to grid
                 // Skip out-of-bound cells for DEM
                 if (nb_coord.x < 0 || nb_coord.x >= grid.dims.x ||
                     nb_coord.y < 0 || nb_coord.y >= grid.dims.y ||

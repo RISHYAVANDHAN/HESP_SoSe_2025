@@ -1,11 +1,6 @@
 #pragma once
 #include <string>
 
-enum class TestCaseType { 
-    NONE, 
-    STABLE, 
-    REPULSIVE, 
-    ATTRACTIVE };
     
 enum class MethodType {
     BASE,
@@ -23,14 +18,14 @@ struct SimulationConfig {
     float epsilon;
     int output_freq;
     bool benchmark;
-    TestCaseType test_case = TestCaseType::NONE;
     float box_size[3];                              // x, y, z = [0, 1, 2]
     float rcut = 0.0f;       
     MethodType method = MethodType::BASE;
-    float particle_radius;  // Default particle radius
-    float stiffness;        // Spring constant
-    float damping;          // Damping coefficient
-    float bounce_coeff;      // Bounce coefficient
+    float particle_radius;                      // Default particle radius
+    float stiffness;                            // Spring constant
+    float damping;                              // Damping coefficient
+    float bounce_coeff;                         // Bounce coefficient
+    float gravity = 9.8;                        // default 9.8, but can be changed anytime in command line
 };
 
 void parse_command_line_args(int argc, char** argv, SimulationConfig& config);

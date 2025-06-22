@@ -18,7 +18,9 @@ static bool first_run = true;
 
 __constant__ float d_box_size[3];
 
-__constant__ float d_gravity[3] = {0.0f, -9.81f, 0.0f};
+SimulationConfig config;
+
+__constant__ float d_gravity[3] ;
 
 __constant__ DEMParams d_dem_params;
 
@@ -111,7 +113,7 @@ __global__ void velocity_verlet_step1(Particle* particles, int num_particles, fl
         p.acceleration = (p.force / p.mass);
         p.position += p.velocity * dt + p.acceleration * (0.5f * dt * dt);
         
-        // Reflexive boundary conditions
+        // maintaing boundary conditions
         for (int d = 0; d < 3; ++d) {
             if (p.position[d] < p.radius) {
                 p.position[d] = 2.0f * p.radius - p.position[d];
@@ -247,9 +249,10 @@ __global__ void compute_dem_contacts_neighbor(Particle* particles, int num_parti
 }
 
 
-__host__ void run_simulation(Particle* particles, int num_particles, float dt, float sigma, float epsilon, float rcut, const float box_size[3], MethodType method, const DEMParams& dem_params) 
+__host__ void run_simulation(Particle* particles, int num_particles, float dt, float sigma, float epsilon, float rcut, const float box_size[3], MethodType method, const DEMParams& dem_params, SimulationConfig) 
 {
     Particle* d_particles;
+    SimulationConfig config;
     size_t size = num_particles * sizeof(Particle);
     cudaMalloc(&d_particles, size);
     cudaMemcpy(d_particles, particles, size, cudaMemcpyHostToDevice);
@@ -261,6 +264,10 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
     // Prepare box_size array for device kernels
     float box_size_arr[3] = {box_size[0], box_size[1], box_size[2]};
     cudaMemcpyToSymbol(d_box_size, box_size_arr, 3 * sizeof(float));
+    cudaMemcpyToSymbol(d_dem_params, &dem_params, sizeof(DEMParams)); 
+
+    float gravity_arr[3] = {0.0f, config.gravity, 0.0f}; // or config.gravity if that's correct
+    cudaMemcpyToSymbol(d_gravity, gravity_arr, 3 * sizeof(float));
 
     // Initialize binning structures on first run
     if (first_run && rcut > 0.0f) {
@@ -285,8 +292,6 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
         
         first_run = false;
     }
-
-    cudaMemcpyToSymbol(d_dem_params, &dem_params, sizeof(DEMParams));
 
     // Step 1: Position update
     if (dt > 0.0f) {
@@ -323,7 +328,7 @@ __host__ void run_simulation(Particle* particles, int num_particles, float dt, f
             for (int i = 0; i < num_particles; i++) {
                 if (particles[i].radius > max_radius) max_radius = particles[i].radius;
             }
-            build_neighbor_list(nb_data, d_particles, bin_data, grid, 2.4f * max_radius);
+            build_neighbor_list(nb_data, d_particles, bin_data, grid, 2.5f * max_radius);
             compute_dem_contacts_neighbor<<<gridSize, blockSize>>>(d_particles, num_particles, nb_data);
             break;
             

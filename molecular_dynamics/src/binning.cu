@@ -65,36 +65,56 @@ __global__ void kernel_mark_cell_starts(
 }
 
 void build_binning(DeviceBinningData& bin_data, const Particle* d_particles, const Grid& grid) {
+    int num_particles = bin_data.num_particles;
+    
+    // Get device properties
+    cudaDeviceProp prop;
+    cudaGetDeviceProperties(&prop, 0);
+    
+    // SAFETY: Validate particle count
+    if (num_particles <= 0) {
+        std::cerr << "Error: Invalid particle count: " << num_particles << std::endl;
+        return;
+    }
+
+    // SAFETY: Choose safe block size
     int blockSize = 256;
-    int gridSize = (bin_data.num_particles + blockSize - 1) / blockSize;
+    if (blockSize > prop.maxThreadsPerBlock) {
+        blockSize = prop.maxThreadsPerBlock;
+        std::cout << "Adjusted block size to " << blockSize << " (max threads per block)\n";
+    }
 
-    // Step 1: Assign cell indices
-    kernel_assign_cell_indices<<<gridSize, blockSize>>>(
-        d_particles, bin_data.cell_indices, bin_data.num_particles, grid
-    );
-    cudaDeviceSynchronize();
+    // SAFETY: Calculate grid size with overflow protection
+    int gridSize = (num_particles + blockSize - 1) / blockSize;
+    
+    // SAFETY: Clamp grid size to CUDA limits
+    if (gridSize > prop.maxGridSize[0]) {
+        gridSize = prop.maxGridSize[0];
+        std::cerr << "Warning: Grid size clamped to " << gridSize 
+                  << " (max allowed: " << prop.maxGridSize[0] << ")\n";
+    }
 
-    // Step 2: Initialize particle_indices as a sequence [0, 1, 2, ...]
-    thrust::device_ptr<int> d_particle_indices(bin_data.particle_indices);
-    thrust::sequence(thrust::device, d_particle_indices, d_particle_indices + bin_data.num_particles);
+    // SAFETY: Check for zero grid size
+    if (gridSize == 0) {
+        std::cerr << "Error: Invalid grid size calculation (particles: " 
+                  << num_particles << ", block: " << blockSize << ")\n";
+        return;
+    }
 
-    // Step 3: Sort particle indices by cell index
-    thrust::device_ptr<int> d_cell_indices(bin_data.cell_indices);
-    thrust::sort_by_key(
-        thrust::device,
-        d_cell_indices, d_cell_indices + bin_data.num_particles,
-        d_particle_indices
-    );
-
-    // Step 4: Compute cell offsets (start of each cell in sorted array)
-    // Clear cell_offsets (including extra element)
-    cudaMemset(bin_data.cell_offsets, 0, (bin_data.num_cells + 1) * sizeof(int));
-
-    // Mark cell starts in the sorted cell_indices array
-    kernel_mark_cell_starts<<<gridSize, blockSize>>>(
-        bin_data.cell_indices, bin_data.cell_offsets, bin_data.num_particles, bin_data.num_cells
-    );
-    cudaDeviceSynchronize();
+    std::cout << "Launching kernel: grid=" << gridSize << ", block=" << blockSize 
+              << ", particles=" << num_particles << "\n";
+    
+    // Launch kernel with enhanced error checking
+    kernel_assign_cell_indices<<<gridSize, blockSize>>>(d_particles, bin_data.cell_indices, num_particles, grid);
+    
+    cudaError_t err = cudaGetLastError();
+    if (err != cudaSuccess) {
+        std::cerr << "Kernel launch failed: " << cudaGetErrorString(err) 
+                  << " (code " << err << ")\n";
+        std::cerr << "Grid: " << gridSize << " blocks, Block: " << blockSize << " threads\n";
+        std::cerr << "Particles: " << num_particles << "\n";
+        exit(1);
+    }
 
     // Note: cell_offsets[c] gives the start index in sorted particle_indices for cell c,
     // and cell_offsets[c+1] gives the end index (exclusive).
